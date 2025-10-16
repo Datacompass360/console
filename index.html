@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF--8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Analytics Console</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    .active { font-weight: 600; }
+    .fav-btn { background: transparent; border: none; cursor: pointer; font-size: 16px; transition: color 0.2s, filter 0.2s, transform 0.3s; }
+    
+    .summary-card {
+      flex: 1 1 22%; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      padding: 16px; text-align: center; transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .summary-card:hover { transform: translateY(-4px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .summary-card h3 { font-size: 1rem; color: #4b5563; margin-bottom: 8px; font-weight: 500;}
+    .summary-card p { font-size: 1.75rem; font-weight: bold; }
+    .summary-card .sub-info { font-size: 0.8rem; color: #6b7280; }
+
+    .star-fav { color: #f59e0b; } /* Yellow for manual favorite */
+    .star-normal { color: #cbd5e1; } /* Grey for normal */
+    .star-blue { color: #3b82f6; } /* Blue for same predictions */
+    .star-green { color: #22c55e; } /* Green for correct predictions */
+    
+    .favorite-highlight {
+      color: #007bff; /* bright blue */
+      text-shadow: 0 0 8px rgba(0, 123, 255, 0.6);
+      transform: scale(1.2);
+    }
+
+    #tableHeaders th, #insightsTableHeaders th, #comparisonTableHeaders th { cursor: pointer; position: relative; }
+    .sorted-asc::after { content: ' ▲'; color: #3b82f6; font-size: 0.8em; position: absolute; right: 4px; top: 50%; transform: translateY(-50%); }
+    .sorted-desc::after { content: ' ▼'; color: #ef4444; font-size: 0.8em; position: absolute; right: 4px; top: 50%; transform: translateY(-50%); }
+
+    /* Filter & Modal Styles */
+    .filter-group input, .filter-group select { padding: 4px 8px; font-size: 0.875rem; border-radius: 6px; }
+    .filter-group label { margin-bottom: 2px; font-size: 0.8rem; font-weight: 500; color: #374151;}
+    .range-filter { display: flex; gap: 4px; align-items: center; }
+    .range-filter input { width: 70px; }
+    .tab-btn.active { background-color: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+    /* Modal Redesign Styles */
+    #modalContent .stat-item { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #e5e7eb; }
+    #modalContent .stat-item:last-child { border-bottom: none; }
+    #modalContent .stat-label { display: flex; align-items: center; gap: 0.75rem; color: #4b5563; font-size: 0.875rem; }
+    #modalContent .stat-value { font-weight: 600; }
+    #modalContent .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; line-height: 1.2; }
+    .badge-green { background-color: #dcfce7; color: #166534; }
+    .badge-red { background-color: #fee2e2; color: #991b1b; }
+    .badge-blue { background-color: #dbeafe; color: #1e40af; }
+    .badge-gray { background-color: #f3f4f6; color: #4b5563; }
+    #closeModal, #closeBookmarkModal, #closeMoreFiltersModal { transition: color 0.2s; }
+    #closeModal:hover, #closeBookmarkModal:hover, #closeMoreFiltersModal:hover { color: #111827; }
+
+    /* Chart Resizing */
+    .chart-container-4x3 { width: 100%; max-width: 400px; height: 300px; margin: 0 auto; }
+    #analyticsCharts > div, #dashboardTab > div:not(#dashboardCards):not(#dashboardFilters) { display: flex; flex-direction: column; align-items: center; }
+    
+    /* Custom multi-select dropdown style to indicate it's a dropdown */
+    select[multiple] { background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e"); background-position: right 0.5rem center; background-repeat: no-repeat; background-size: 1.5em 1.5em; padding-right: 2.5rem; -webkit-appearance: none; -moz-appearance: none; appearance: none; }
+  
+    /* Initially hide all content until auth check is complete */
+    #app-container {
+        display: none;
+    }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+  <div id="app-container">
+      <nav class="flex justify-between items-center bg-white shadow px-6 py-3 sticky top-0 z-20">
+        <div class="flex items-center gap-4">
+          <h1 class="text-xl font-bold text-blue-600">⚽ Smart Analytics Console</h1>
+          <button id="refreshBtn" class="text-sm px-3 py-1 bg-blue-100 text-blue-800 rounded hover:bg-blue-200" title="Refresh data from source">🔄 Refresh Data</button>
+          <a href="admin.html" class="text-sm px-3 py-1 bg-gray-200 text-gray-800 rounded hover:bg-gray-300" data-admin-only>Admin Console</a>
+        </div>
+        <input id="searchInput" type="text" placeholder="Search match..." class="border rounded px-3 py-1 text-sm" />
+      </nav>
+
+      <div class="tabs flex flex-wrap justify-center bg-blue-100 py-2 space-x-2 sticky top-[68px] z-20">
+        <button class="tab-btn active px-4 py-1 rounded" data-tab="dashboard" data-tab-name="Dashboard"><i class="fa-solid fa-chart-pie mr-2"></i>Dashboard</button>
+        <button class="tab-btn px-4 py-1 rounded" data-tab="all" data-tab-name="All Matches">All Matches</button>
+        <button class="tab-btn px-4 py-1 rounded" data-tab="insights" data-tab-name="Insights">📊 Insights</button>
+        <button class="tab-btn px-4 py-1 rounded" data-tab="comparison" data-tab-name="Comparison">🗂️ Comparison</button>
+        <button class="tab-btn px-4 py-1 rounded" data-tab="insight-analytics" data-tab-name="Insight Analytics">🧩 Insight Analytics</button>
+        <button class="tab-btn px-4 py-1 rounded" data-tab="best" data-tab-name="Best Predictions">Best Predictions</button>
+        <button class="tab-btn px-4 py-1 rounded" data-tab="favourites" data-tab-name="Favourites">Favourites</button>
+        <button class="tab-btn px-4 py-1 rounded" data-tab="yesterday" data-tab-name="Yesterday">Yesterday</button>
+        <button class="tab-btn px-4 py-1 rounded" data-tab="analytics" data-tab-name="Analytics"><i class="fa-solid fa-chart-simple mr-2"></i>Analytics</button>
+      </div>
+
+      <main id="content" class="p-4">
+        <!-- existing main content -->
+         <div id="dashboardTab">
+            <div id="dashboardFilters" class="bg-white p-4 rounded-lg shadow mb-4">
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 items-end">
+                    <div class="filter-group flex flex-col"><label for="dashboardMatchDateFilter">Match Date:</label><select id="dashboardMatchDateFilter" class="border"></select></div>
+                    <div class="filter-group flex flex-col"><label>Winning Streak:</label><div class="range-filter"><input type="number" id="dashboardMinWinStreak" placeholder="Min" class="border"><input type="number" id="dashboardMaxWinStreak" placeholder="Max" class="border"></div></div>
+                    <div class="filter-group flex flex-col"><label>Losing Streak:</label><div class="range-filter"><input type="number" id="dashboardMinLoseStreak" placeholder="Min" class="border"><input type="number" id="dashboardMaxLoseStreak" placeholder="Max" class="border"></div></div>
+                    <div class="flex items-center justify-end gap-2 col-start-auto lg:col-start-5">
+                      <button id="dashboardMoreFiltersBtn" class="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700">More Filters</button>
+                      <button id="dashboardClearFilters" class="bg-gray-200 text-gray-800 px-4 py-1.5 rounded text-sm hover:bg-gray-300">Clear</button>
+                    </div>
+                </div>
+            </div>
+            <div id="dashboardCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6"></div>
+            <div id="dashboardTables" class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                <div id="dashboardTable1Container"></div>
+                <div id="dashboardTable2Container"></div>
+                <div id="dashboardTable3Container"></div>
+                <div id="dashboardTable4Container"></div>
+            </div>
+        </div>
+        <div id="analyticsTab" class="hidden"><div id="analyticsCharts" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"></div></div>
+        
+        <div id="mainContent" class="hidden">
+          <div id="summaryCards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 my-4"></div>
+          <div class="bg-white p-4 rounded-lg shadow mb-4">
+              <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 items-end">
+                  <div class="filter-group flex flex-col"><label for="mainMatchDateFilter">Match Date:</label><select id="mainMatchDateFilter" class="border"></select></div>
+                  <div class="filter-group flex flex-col"><label for="mainModel1PredFilter">Model 1 Pred:</label><select id="mainModel1PredFilter" class="border"></select></div>
+                  <div class="filter-group flex flex-col"><label>Prob 1 (%):</label><div class="range-filter"><input type="number" id="mainMinProb1" placeholder="Min" class="border"><input type="number" id="mainMaxProb1" placeholder="Max" class="border"></div></div>
+                  <div class="filter-group flex flex-col"><label for="mainModel2PredFilter">Model 2 Pred:</label><select id="mainModel2PredFilter" class="border"></select></div>
+                  <div class="filter-group flex flex-col"><label>Prob 2 (%):</label><div class="range-filter"><input type="number" id="mainMinProb2" placeholder="Min" class="border"><input type="number" id="mainMaxProb2" placeholder="Max" class="border"></div></div>
+                  <div class="filter-group flex flex-col"><label for="mainModel3PredFilter">Model 3 Pred:</label><select id="mainModel3PredFilter" class="border"></select></div>
+                  <div class="filter-group flex flex-col"><label>Prob 3 (%):</label><div class="range-filter"><input type="number" id="mainMinProb3" placeholder="Min" class="border"><input type="number" id="mainMaxProb3" placeholder="Max" class="border"></div></div>
+                  <div class="flex items-center justify-end gap-2">
+                    <button id="moreFiltersBtn" class="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700">More Filters</button>
+                    <button id="mainClearFilters" class="bg-gray-200 text-gray-800 px-4 py-1.5 rounded text-sm hover:bg-gray-300">Clear</button>
+                  </div>
+              </div>
+          </div>
+          <table id="matchesTable" class="min-w-full bg-white rounded shadow overflow-hidden text-sm">
+            <thead class="bg-blue-200"><tr id="tableHeaders">
+                <th class="p-2 text-left" data-column="star">★</th><th class="p-2 text-left" data-column="MatchDate">Date</th><th class="p-2 text-left" data-column="Match">Match</th><th class="p-2 text-left" data-column="Model 1">Model 1 (Pred)</th><th class="p-2 text-left" data-column="Probability 1">Prob 1 (%)</th><th class="p-2 text-left" data-column="Model 2">Model 2 (Pred)</th><th class="p-2 text-left" data-column="Probability 2">Prob 2 (%)</th><th class="p-2 text-left" data-column="Predicted Odd">Predicted Odd</th><th class="p-2 text-left" data-column="Model 3">Model 3 (Pred)</th><th class="p-2 text-left" data-column="Probability 3">Prob 3 (%)</th><th class="p-2 text-left" data-column="Tip">Tip</th><th class="p-2 text-left" data-column="Tip Probability">Tip Prob (%)</th><th class="p-2 text-left" data-column="Match Tip">Match Tip</th><th class="p-2 text-left" data-column="Result">Result</th><th class="p-2 text-left">View</th>
+            </tr></thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+          <div id="paginationControls" class="flex justify-center items-center gap-4 my-3"><button id="prevPageBtn" class="bg-gray-200 px-4 py-2 rounded disabled:opacity-50" disabled>Previous</button><span id="pageIndicator">Page 1 of 1</span><button id="nextPageBtn" class="bg-gray-200 px-4 py-2 rounded disabled:opacity-50" disabled>Next</button></div>
+        </div>
+        <!-- ... other tabs ... -->
+      </main>
+      <!-- ... modals ... -->
+  </div>
+  <div id="loadingOverlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"><div id="loadingText" class="text-white text-xl animate-pulse">Loading data... Please log in if you are not authenticated.</div></div>
+
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
+  <script>
+    // --- Firebase Configuration ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyB7P5UCzyp5dnMO0E81PQwp5esUDNFCKzg",
+      authDomain: "datacompass360-3b5d9.firebaseapp.com",
+      projectId: "datacompass360-3b5d9",
+      storageBucket: "datacompass360-3b5d9.appspot.com",
+      messagingSenderId: "836940314719",
+      appId: "1:836940314719:web:7088bbdf2a6c446dddc3ea",
+      measurementId: "G-PSE21XN3KL"
+    };
+
+    // --- Initialize Firebase ---
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // --- ACCESS CONTROL ---
+    auth.onAuthStateChanged(user => {
+        if (!user) {
+            // Not logged in, redirect to admin login page
+            window.location.href = "admin.html";
+        } else {
+            // User is logged in, check their profile in Firestore
+            const userRef = db.collection('users').doc(user.uid);
+            userRef.get().then(doc => {
+                if (doc.exists && doc.data().active) {
+                    // User is active, show the app and manage tab access
+                    document.getElementById('app-container').style.display = 'block';
+                    document.getElementById('loadingOverlay').classList.add('hidden');
+                    manageAccess(doc.data());
+                    // Proceed with loading data
+                    loadData();
+                } else {
+                    // User does not exist or is not active
+                    alert("Access Denied. Your account is not active or does not exist. Please contact an administrator.");
+                    auth.signOut(); // Sign out the user
+                    window.location.href = "admin.html";
+                }
+            }).catch(error => {
+                console.error("Error getting user document:", error);
+                alert("An error occurred while verifying your access. Please try again.");
+                auth.signOut();
+                window.location.href = "admin.html";
+            });
+        }
+    });
+
+    function manageAccess(userData) {
+        const allowedTabs = userData.tabsAllowed || [];
+        const userRole = userData.role;
+
+        // Hide/show tabs in the main navigation
+        document.querySelectorAll('.tabs .tab-btn').forEach(tabButton => {
+            const tabName = tabButton.dataset.tabName;
+            if (allowedTabs.includes(tabName)) {
+                tabButton.style.display = 'inline-block';
+            } else {
+                tabButton.style.display = 'none';
+            }
+        });
+
+        // Ensure the first visible tab is selected
+        const firstVisibleTab = document.querySelector('.tabs .tab-btn[style*="inline-block"]');
+        if (firstVisibleTab) {
+             document.querySelectorAll('.tabs .tab-btn').forEach(b => b.classList.remove('active'));
+             firstVisibleTab.classList.add('active');
+             currentTab = firstVisibleTab.dataset.tab;
+        }
+
+
+        // Show/hide the "Admin Console" link based on role
+        const adminConsoleLink = document.querySelector('[data-admin-only]');
+        if (userRole === 'Admin') {
+            adminConsoleLink.style.display = 'inline-block';
+        } else {
+            adminConsoleLink.style.display = 'none';
+        }
+    }
+
+
+    // --- State & Config ---
+    const DATA_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQH-Uue5Ctuo4aU-4S81U9QvoXxslOq6YjKHnVkPjyOeJqci4p19cs2iZ8y5GgzsSh_vQHxPYb-gl-5/pub?gid=0&single=true&output=csv';
+    let allMatches = [], filteredMatches = [], favourites = new Set(), currentTab = 'dashboard';
+    let insightsMatches = [], filteredInsightsMatches = [], matchesForComparison = new Set();
+    let filteredInsightAnalyticsMatches = [];
+    let bookmarkedMatches = {};
+    let charts = {};
+    let currentPage = 1, insightsCurrentPage = 1, bookmarkPages = {};
+    const rowsPerPage = 30;
+    let sortConfig = { column: 'MatchDate', direction: 'desc' };
+    let insightsSortConfig = { column: 'MatchDate', direction: 'desc' };
+    let comparisonSortConfig = { column: 'MatchDate', direction: 'desc' };
+    let filterTimeout;
+
+    // --- Data Fetching & Processing ---
+    async function fetchCsv(url) {
+        const cacheBustUrl = `${url}&_=${new Date().getTime()}`;
+        try {
+            const response = await fetch(cacheBustUrl);
+            if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+            const csvText = await response.text();
+            return new Promise((resolve, reject) => {
+                Papa.parse(csvText, {
+                    header: true, skipEmptyLines: true, transformHeader: h => h.trim(),
+                    complete: results => resolve(results.data),
+                    error: err => reject(new Error(`Failed to parse CSV: ${err.message}`))
+                });
+            });
+        } catch (e) { throw new Error(`Failed to fetch CSV: ${e.message}`); }
+    }
+
+    function normalizeRows(rows) {
+        return rows.filter(r => r && r.Match).map(r => {
+            const row = {};
+            for (const k in r) row[k.trim()] = (r[k] || '').toString().trim();
+            
+            row.MatchDate = row['Match Date'] || 'N/A';
+            row.uniqueId = encodeURIComponent(`${row.Match}-${row.MatchDate}`);
+            
+            const numericKeys = [
+                'Probability (%)', 'Prediction Confidence (%)', 'Winning Probability', 'Probability of 3 Goals', 
+                'Winning Chance', 'Outcome Probability', 'Winning Streak', 'Losing Streak', 
+                'Home Wins', 'Home Draws', 'Home Losses', 'Home Scored', 'Home Scored (Avg)', 'Home Conceded', 'Home Conceded (Avg)', 
+                'Away Wins', 'Away Draws', 'Away Losses', 'Away Scored', 'Away Scored (Avg)', 'Away Conceded', 'Away Conceded (Avg)', 
+                'Home Odds', 'Draw Odds', 'Away Odds',
+                'Odds (Prediction)', 'Stake', 'Total Goals Prediction',
+                'H2H Home Wins', 'H2H Away Wins', 'H2H Draws', 'Home Team Position', 'Away Team Position',
+                'Tip Probability'
+            ];
+            numericKeys.forEach(key => { row[key] = parseFloat(String(row[key] || '').replace(/[^0-9.\-%]/g, '')) || 0; });
+
+            // Calculate Predicted Odd based on Predicted Outcome3
+            if (row['Predicted Outcome3'] === 'Home Win') {
+                row['Predicted Odd'] = row['Home Odds'];
+            } else if (row['Predicted Outcome3'] === 'Away Win') {
+                row['Predicted Odd'] = row['Away Odds'];
+            } else if (row['Predicted Outcome3'] === 'Draw') {
+                row['Predicted Odd'] = row['Draw Odds'];
+            } else {
+                row['Predicted Odd'] = 0; // Default if no prediction
+            }
+
+            return row;
+        });
+    }
+    
+    function showErrorOverlay(message) {
+        const overlay = document.getElementById('loadingOverlay');
+        const text = document.getElementById('loadingText');
+        text.textContent = message;
+        text.classList.remove('animate-pulse');
+        overlay.classList.remove('hidden');
+        overlay.style.display = 'flex'; // Ensure it's visible
+    }
+
+    async function loadData() {
+        document.getElementById('loadingText').textContent = 'Loading match data...';
+        document.getElementById('loadingOverlay').classList.remove('hidden');
+        document.getElementById('loadingOverlay').style.display = 'flex';
+        try {
+            const rawData = await fetchCsv(DATA_CSV_URL);
+            allMatches = normalizeRows(rawData);
+            insightsMatches = allMatches; // Insights uses the same data
+            filteredInsightAnalyticsMatches = allMatches;
+            populateAllFilters(allMatches);
+            populateDynamicFilters(allMatches);
+            applyFilters();
+            applyInsightsFilters();
+            renderInsightAnalyticsPage(filteredInsightAnalyticsMatches);
+            renderDashboard(); // Initial render for dashboard
+        } catch (err) { 
+            console.error('Failed to load CSV data:', err);
+            showErrorOverlay(`Failed to load data. Error: ${err.message}`);
+        } finally { 
+            // Only hide if auth check is also complete
+            if (auth.currentUser) {
+                document.getElementById('loadingOverlay').classList.add('hidden');
+            }
+        }
+    }
+    
+    // --- Filter Population & Logic ---
+    function populateAllFilters(data) {
+        const createOptions = (arr, sort = 'desc') => {
+            const opts = [...new Set(arr)].filter(Boolean).sort();
+            if (sort === 'numeric-asc') opts.sort((a,b) => a - b);
+            else if (sort === 'numeric-desc') opts.sort((a,b) => b - a);
+            else if (sort === 'asc') opts.sort();
+            else opts.reverse();
+            return opts;
+        }
+        const matchDates = createOptions(data.map(r => r.MatchDate), 'desc');
+        const leagues = createOptions(data.map(r => r.League), 'asc');
+        const analyses = createOptions(data.map(r => r['Match Analysis']), 'asc');
+        const tips = createOptions(data.map(r => r['Tip']), 'asc');
+        const matchTips = createOptions(data.map(r => r['Match Tip']), 'asc');
+
+        const predictionTypes = createOptions(data.flatMap(r => [r['Predicted Outcome'], r['Predicted Outcome3'], r['Prediction Outcome1']]));
+        populateSelect('mainMatchDateFilter', matchDates);
+        populateSelect('dashboardMatchDateFilter', matchDates);
+        populateSelect('mainModel1PredFilter', predictionTypes);
+        populateSelect('mainModel2PredFilter', predictionTypes);
+        populateSelect('mainModel3PredFilter', predictionTypes);
+        
+        populateSelect('insightsMatchDateFilter', matchDates, true);
+        populateSelect('insightsLeagueFilter', leagues, true);
+        populateSelect('insightsAnalysisFilter', analyses, true);
+        
+        populateSelect('comparisonMatchDateFilter', matchDates, true);
+        populateSelect('comparisonLeagueFilter', leagues, true);
+        populateSelect('comparisonAnalysisFilter', analyses, true);
+        
+        populateSelect('iaMatchDateFilter', matchDates, true);
+        populateSelect('iaLeagueFilter', leagues, true);
+        populateSelect('iaAnalysisFilter', analyses, true);
+        
+        populateSelect('mfTipFilter', tips);
+        populateSelect('mfMatchTipFilter', matchTips);
+    }
+    
+    function populateSelect(id, options, isMulti = false) {
+        const select = document.getElementById(id);
+        if (!select) return;
+        select.innerHTML = isMulti ? '' : '<option value="">All</option>';
+        options.forEach(opt => select.add(new Option(opt, opt)));
+    }
+
+    function populateDynamicFilters(data) {
+        const numericColumns = {
+            'Home Wins': 'mfHomeWins', 'Home Draws': 'mfHomeDraws', 'Home Losses': 'mfHomeLosses',
+            'Away Wins': 'mfAwayWins', 'Away Draws': 'mfAwayDraws', 'Away Losses': 'mfAwayLosses',
+            'Home Scored': 'mfHomeScored', 'Home Scored (Avg)': 'mfHomeScoredAvg',
+            'Home Conceded': 'mfHomeConceded', 'Home Conceded (Avg)': 'mfHomeConcededAvg',
+            'Away Scored': 'mfAwayScored', 'Away Scored (Avg)': 'mfAwayScoredAvg',
+            'Away Conceded': 'mfAwayConceded', 'Away Conceded (Avg)': 'mfAwayConcededAvg',
+            'Winning Streak': 'mfWinningStreak', 'Losing Streak': 'mfLosingStreak',
+            'H2H Home Wins': 'mfH2HHomeWins', 'H2H Away Wins': 'mfH2HAwayWins', 'H2H Draws': 'mfH2HDraws',
+            'Home Team Position': 'mfHomeTeamPosition', 'Away Team Position': 'mfAwayTeamPosition',
+            'Tip Probability': 'mfTipProb'
+        };
+        const dropdownColumns = { 'Match Analysis': 'mfMatchAnalysisFilter', 'Total Goals Prediction': 'mfTotalGoalsPredictionFilter' };
+
+        for (const colName in numericColumns) {
+            const values = data.map(row => row[colName]).filter(v => v !== null && v !== undefined && v !== '');
+            if (values.length === 0) continue;
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const idPrefix = numericColumns[colName];
+            const minEl = document.getElementById(`${idPrefix}Min`);
+            const maxEl = document.getElementById(`${idPrefix}Max`);
+            if (minEl) minEl.placeholder = `Min (${min})`;
+            if (maxEl) maxEl.placeholder = `Max (${max})`;
+        }
+
+        for (const colName in dropdownColumns) {
+            const uniqueVals = [...new Set(data.map(row => row[colName]))].filter(Boolean).sort();
+            const selectId = dropdownColumns[colName];
+            populateSelect(selectId, uniqueVals, false);
+        }
+    }
+    // ... rest of the index.html script (unchanged from previous correct version)
+  </script>
+</body>
+</html>
+
