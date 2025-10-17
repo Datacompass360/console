@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Smart Analytics Console</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen">
+
+    <div class="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 space-y-6">
+        <div class="text-center">
+            <h1 class="text-2xl font-bold text-blue-600">⚽ Smart Analytics Console</h1>
+            <p class="text-gray-500 mt-2">Welcome back! Please login to your account.</p>
+        </div>
+
+        <div id="error-message" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative" role="alert">
+            <strong class="font-bold">Error!</strong>
+            <span class="block sm:inline" id="error-text"></span>
+        </div>
+
+        <form id="login-form" class="space-y-6">
+            <div class="relative">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                    <i class="fa fa-envelope text-gray-400"></i>
+                </span>
+                <input type="email" id="email" placeholder="Email Address" class="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+            </div>
+            <div class="relative">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                    <i class="fa fa-lock text-gray-400"></i>
+                </span>
+                <input type="password" id="password" placeholder="Password" class="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+            </div>
+
+            <div class="flex items-center justify-between">
+                <a href="#" id="forgot-password" class="text-sm text-blue-600 hover:underline">Forgot Password?</a>
+            </div>
+
+            <button type="submit" id="login-button" class="w-full bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700 transition duration-300">
+                Login Now
+            </button>
+        </form>
+
+        <p class="text-center text-sm text-gray-600">
+            Don't have an account? <a href="signup.html" class="font-medium text-blue-600 hover:underline">Sign Up</a>
+        </p>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyB7P5UCzyp5dnMO0E81PQwp5esUDNFCKzg",
+            authDomain: "datacompass360-3b5d9.firebaseapp.com",
+            projectId: "datacompass360-3b5d9",
+            storageBucket: "datacompass360-3b5d9.firebasestorage.app",
+            messagingSenderId: "836940314719",
+            appId: "1:836940314719:web:7088bbdf2a6c446dddc3ea",
+            measurementId: "G-PSE21XN3KL"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const loginForm = document.getElementById('login-form');
+        const loginButton = document.getElementById('login-button');
+        const errorMessageDiv = document.getElementById('error-message');
+        const errorText = document.getElementById('error-text');
+        const forgotPasswordLink = document.getElementById('forgot-password');
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            loginButton.disabled = true;
+            loginButton.textContent = 'Logging in...';
+            errorMessageDiv.classList.add('hidden');
+
+            try {
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+
+                // Check user status in Firestore
+                const userDocRef = doc(db, "users", user.uid);
+                const userDoc = await getDoc(userDocRef);
+
+                if (userDoc.exists() && userDoc.data().status === "Active") {
+                    window.top.location.href = './index.html';
+                } else {
+                    await auth.signOut();
+                    showError('Your account is inactive or does not exist. Please contact an administrator.');
+                }
+
+            } catch (error) {
+                console.error("Login Error:", error);
+                showError(getFriendlyErrorMessage(error.code));
+            } finally {
+                loginButton.disabled = false;
+                loginButton.textContent = 'Login Now';
+            }
+        });
+
+        forgotPasswordLink.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            if (!email) {
+                showError('Please enter your email address to reset your password.');
+                return;
+            }
+
+            try {
+                await sendPasswordResetEmail(auth, email);
+                alert('Password reset email sent! Please check your inbox.');
+            } catch (error) {
+                console.error("Password Reset Error:", error);
+                showError(getFriendlyErrorMessage(error.code));
+            }
+        });
+
+        function showError(message) {
+            errorText.textContent = message;
+            errorMessageDiv.classList.remove('hidden');
+        }
+
+        function getFriendlyErrorMessage(code) {
+            switch (code) {
+                case 'auth/invalid-email':
+                    return 'Please enter a valid email address.';
+                case 'auth/user-not-found':
+                case 'auth/wrong-password':
+                case 'auth/invalid-credential':
+                    return 'Invalid email or password.';
+                case 'auth/too-many-requests':
+                    return 'Too many login attempts. Please try again later.';
+                default:
+                    return 'An unexpected error occurred. Please try again.';
+            }
+        }
+    </script>
+</body>
+</html>
+
